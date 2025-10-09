@@ -7,167 +7,121 @@ from models.pv_custom.enums import RackingType, TrackingType
 
 
 class PVSystemHelper:
-    _CACHED_INVERTERS = None
-    _CACHED_INVERTER_DATA = None
 
+    def get_cec_inverters_by_kwp(
+            self, 
+            kwp,
+            dcac_max=1.35
+        ):
 
-    def filter_cec_inverters_by_kwp(self, kwp, oversize_ratio=1.3):
-        inverters = pv.retrieve_sam('cecinverter')
+        inv = pv.retrieve_sam('cecinverter').T.copy()
+        Pdc = kwp * 1000.0
+
         if kwp <= 15:
-            max_number_of_inverters = 1
-            max_inverter_power_w = 20000.0
+            max_n = 1
         elif kwp <= 100:
-            max_number_of_inverters = 2
-            max_inverter_power_w = 110000.0
+            max_n = 2
         elif kwp <= 500:
-            max_number_of_inverters = max(2, int(kwp / 50))
-            max_inverter_power_w = 300000.0
+            max_n = max(2, int(kwp / 50))
         else:
-            max_number_of_inverters = max(4, int(kwp / 100))
-            max_inverter_power_w = 500000.0
-        system_size_w = kwp * 1000
-        min_inverter_power = system_size_w / (oversize_ratio * max_number_of_inverters)
+            max_n = max(4, int(kwp / 100))
 
-        power_filter = (
-            (inverters.T['Paco'] >= min_inverter_power) & 
-            (inverters.T['Paco'] <= max_inverter_power_w)
+        n_vals = np.arange(1, max_n + 1, dtype=float)
+        lower = Pdc / (n_vals * dcac_max)
+        upper = Pdc / (n_vals)
+
+        Paco = inv['Paco'].astype(float).values  
+        fits_any_n = np.any(
+            (Paco >= lower[:, None]) & (Paco <= upper[:, None]),
+            axis=0
         )
-        filtered_inverters = inverters.T[power_filter].T
-        return filtered_inverters
 
-    def filter_cec_modules_by_tech_choice(self, technology) -> pd.DataFrame:
+        has_windows = inv[['Vdcmax', 'Mppt_low', 'Mppt_high']].notna().all(axis=1)
+
+        filtered = inv[fits_any_n & has_windows].T 
+        return filtered
+
+    def get_cec_modules_by_tech_choice(self, technology) -> pd.DataFrame:
         cecmodules = pv.retrieve_sam('cecmod')
         tech_modules = cecmodules.T[cecmodules.T['Technology'] == technology].T
 
         return tech_modules
 
-    @staticmethod
-    def filter_cec_inverters_by_modules(
-        modules: pd.DataFrame, 
-        hot_temperature: float, 
-        cold_temperature: float,
-        voc_margin=0.97
-    ) -> pd.DataFrame:
-        
-        # Get inverters once
-        inverters = pv.retrieve_sam('cecinverter')
-        
-        # Convert inverters to DataFrame for vectorization
-        inv_df = pd.DataFrame(inverters).T
-        inv_df['Mppt_low'] = inv_df['Mppt_low'].astype(float)
-        inv_df['Mppt_high'] = inv_df['Mppt_high'].astype(float) 
-        inv_df['Vdcmax'] = inv_df['Vdcmax'].astype(float)
-        
-        compatible_inverters = set()
-        
-        for _, mp in modules.items():
-            Vmp_hot, Voc_hot_dummy = PVSystemHelper.module_iv_at(mp, hot_temperature)
-            Vmp_cold, Voc_cold = PVSystemHelper.module_iv_at(mp, cold_temperature)
-            
-            if Vmp_hot <= 0 or Vmp_cold <= 0 or Voc_cold <= 0:
-                continue
-            
-            # Vectorized operations on the entire inverter DataFrame
-            n_min = np.ceil(inv_df['Mppt_low'] / Vmp_hot).astype(int)
-            n_max_mppt = np.floor(inv_df['Mppt_high'] / Vmp_cold).astype(int)
-            n_max_voc = np.floor(voc_margin * inv_df['Vdcmax'] / Voc_cold).astype(int)
-            n_max = np.minimum(n_max_mppt, n_max_voc)
-            
-            # Filter compatible inverters
-            compatible_mask = (n_min <= n_max) & (n_max >= 1)
-            compatible_inv_names = inv_df[compatible_mask].index
-            compatible_inverters.update(compatible_inv_names)
-        
-        return pd.DataFrame({name: inverters[name] for name in compatible_inverters})
-
-    @staticmethod
-    def filter_cec_modules_by_inverters(
-        modules: pd.DataFrame,
-        inverters: pd.DataFrame,
-        hot_temperature: float, 
-        cold_temperature: float,
-        voc_margin=0.97,
-        batch_size: int = 1000
-    ) -> pd.DataFrame:
-        """
-        Batched vectorized processing for very large module databases
-        """
-        # Convert inverters to arrays once
-        inv_df = pd.DataFrame(inverters).T
-        mppt_lows = inv_df['Mppt_low'].astype(float).values
-        mppt_highs = inv_df['Mppt_high'].astype(float).values
-        vdcmaxs = inv_df['Vdcmax'].astype(float).values
-        
-        n_inverters = len(mppt_lows)
-        compatible_modules = {}
-        
-        # Process modules in batches to manage memory
-        module_items = list(modules.items())
-        
-        for i in range(0, len(module_items), batch_size):
-            batch = module_items[i:i + batch_size]
-            batch_module_names = []
-            batch_Vmp_hot = []
-            batch_Vmp_cold = [] 
-            batch_Voc_cold = []
-            
-            # Calculate module parameters for this batch
-            for module_name, mp in batch:
-                Vmp_hot, Voc_hot_dummy = PVSystemHelper.module_iv_at(mp, hot_temperature)
-                Vmp_cold, Voc_cold = PVSystemHelper.module_iv_at(mp, cold_temperature)
-                
-                if Vmp_hot > 1e-6 and Vmp_cold > 1e-6 and Voc_cold > 1e-6:
-                    batch_module_names.append(module_name)
-                    batch_Vmp_hot.append(Vmp_hot)
-                    batch_Vmp_cold.append(Vmp_cold)
-                    batch_Voc_cold.append(Voc_cold)
-            
-            if not batch_module_names:
-                continue
-                
-            # Convert to arrays
-            Vmp_hot_arr = np.array(batch_Vmp_hot)
-            Vmp_cold_arr = np.array(batch_Vmp_cold)
-            Voc_cold_arr = np.array(batch_Voc_cold)
-            n_batch_modules = len(Vmp_hot_arr)
-            
-            # Vectorized broadcasting
-            Vmp_hot_2d = Vmp_hot_arr[:, np.newaxis]
-            Vmp_cold_2d = Vmp_cold_arr[:, np.newaxis]
-            Voc_cold_2d = Voc_cold_arr[:, np.newaxis]
-            
-            mppt_lows_2d = mppt_lows[np.newaxis, :]
-            mppt_highs_2d = mppt_highs[np.newaxis, :]
-            vdcmaxs_2d = vdcmaxs[np.newaxis, :]
-            
-            # Vectorized calculations
-            with np.errstate(divide='ignore', invalid='ignore'):
-                n_min = np.ceil(mppt_lows_2d / Vmp_hot_2d).astype(int)
-                n_max_mppt = np.floor(mppt_highs_2d / Vmp_cold_2d).astype(int)
-                n_max_voc = np.floor(voc_margin * vdcmaxs_2d / Voc_cold_2d).astype(int)
-            
-            n_max = np.minimum(n_max_mppt, n_max_voc)
-            compatibility_matrix = (n_min <= n_max) & (n_max >= 1)
-            batch_compatible = np.any(compatibility_matrix, axis=1)
-            
-            # Add compatible modules from this batch
-            for j, is_compatible in enumerate(batch_compatible):
-                if is_compatible:
-                    module_name = batch_module_names[j]
-                    compatible_modules[module_name] = modules[module_name]
-        
-        print(f"Batched module filter: {len(modules)} -> {len(compatible_modules)} modules")
-        return pd.DataFrame(compatible_modules)
-
-    @staticmethod
-    def module_iv_at(mp, Tcell, poa=1000):
-        calc = pv.calcparams_cec(
-            effective_irradiance=poa, temp_cell=Tcell,
-            alpha_sc=float(mp['alpha_sc']), a_ref=float(mp['a_ref']),
-            I_L_ref=float(mp['I_L_ref']), I_o_ref=float(mp['I_o_ref']),
-            R_sh_ref=float(mp['R_sh_ref']), R_s=float(mp['R_s']),
-            Adjust=float(mp.get('Adjust', 1.0)),
-            EgRef=float(mp.get('EgRef', 1.121)), dEgdT=float(mp.get('dEgdT', -0.0002677)),
+    def filter_legacy_or_out_of_scope_cec_modules(self, filtered_modules):
+        name = filtered_modules.index.astype(str).str.lower()
+        drop_mask = (
+            name.T.str.contains('cpv|concentrat|bipv|laminat|tile|transparent')
         )
-        sd = pv.singlediode(*calc, method='lambertw')
-        return float(sd['v_mp']), float(sd['v_oc'])
+        filtered_modules = filtered_modules[~drop_mask]
+        filtered_modules = filtered_modules.T[filtered_modules.T['STC'] >= 240].T
+
+        return filtered_modules
+
+    def filter_cec_modules_by_racking_type(self, filtered_modules: pd.DataFrame, racking_type: RackingType) -> pd.DataFrame:
+
+        if racking_type in (RackingType.open_rack, RackingType.freestanding):
+            filtered_modules = filtered_modules.T[filtered_modules.T['STC'] >= 450].T
+            filtered_modules = filtered_modules.T[filtered_modules.T['STC'] / (filtered_modules.T['A_c'] * 1000) >= 0.19].T
+        elif racking_type in (RackingType.close_mount, RackingType.semi_integrated):
+            filtered_modules = filtered_modules.T[filtered_modules.T['A_c'] <= 2.2].T
+            filtered_modules = filtered_modules.T[filtered_modules.T['Bifacial'] == 0].T
+            filtered_modules = filtered_modules.T[filtered_modules.T['STC'] / (filtered_modules.T['A_c'] * 1000) >= 0.18].T
+        elif racking_type in (RackingType.insulated_back, RackingType.insulated):
+            filtered_modules = filtered_modules.T[filtered_modules.T['A_c'] <= 2.0].T
+            filtered_modules = filtered_modules.T[filtered_modules.T['Bifacial'] == 0].T
+            filtered_modules = filtered_modules.T[filtered_modules.T['STC'] / (filtered_modules.T['A_c'] * 1000) >= 0.19].T
+
+        return filtered_modules
+
+    @staticmethod
+    def filter_cec_modules_by_voltage(
+        cecmodules: pd.DataFrame,
+        inverters: pd.DataFrame,
+        u_v,
+        u_c,
+        hot_temperature_ambient: float = 45.0,
+        cold_temperature_ambient: float = -10.0,
+        POA_hot: float = 1000.0,
+        wind_hot: float = 1.0,
+        eps: float = 1e-6,
+    ):
+
+        hot_temperature_cell = PVSystemHelper._estimate_cell_T(hot_temperature_ambient, POA_hot, wind_hot, u_c, u_v)
+        Vmp_hot  = cecmodules['V_mp_ref'] + cecmodules['beta_oc'] * (hot_temperature_cell - 25.0)
+        Voc_cold = cecmodules['V_oc_ref'] + cecmodules['beta_oc'] * (cold_temperature_ambient - 25.0)
+
+        cecmodules['Vmp_hot']  = Vmp_hot
+        cecmodules['Voc_cold'] = Voc_cold
+
+        if cecmodules.empty or inverters.empty:
+            return cecmodules.iloc[0:0], inverters.iloc[0:0]  
+        inv = inverters.T[['Mppt_low','Mppt_high','Vdcmax']].astype(float).copy()
+        inv = inv.dropna()
+        if inv.empty:
+            return cecmodules.iloc[0:0], inverters.iloc[0:0]
+
+        Vmp_hot_arr  = cecmodules['Vmp_hot'].astype(float).to_numpy(dtype=np.float64).reshape(-1, 1)   # (M,1)
+        Voc_cold_arr = cecmodules['Voc_cold'].astype(float).to_numpy(dtype=np.float64).reshape(-1, 1)  # (M,1)
+        Vlo = inv['Mppt_low' ].to_numpy(dtype=np.float64).reshape(1, -1)  # (1,N)
+        Vhi = inv['Mppt_high'].to_numpy(dtype=np.float64).reshape(1, -1)  # (1,N)
+        Vdc= inv['Vdcmax'    ].to_numpy(dtype=np.float64).reshape(1, -1)  # (1,N)
+
+        n_min       = np.ceil( Vlo / np.maximum(Vmp_hot_arr, eps) )
+        n_max_mppt  = np.floor( Vhi / np.maximum(Vmp_hot_arr, eps) )
+        n_max_vdc   = np.floor( (Vdc - eps) / np.maximum(Voc_cold_arr, eps) )
+        n_max       = np.minimum(n_max_mppt, n_max_vdc)
+
+        feasible = (n_min <= n_max) & (n_min >= 1)
+
+        mod_keep_mask = feasible.any(axis=1)  # (M,)
+        inv_keep_mask = feasible.any(axis=0)  # (N,)
+
+        kept_modules   = cecmodules.loc[cecmodules.index[mod_keep_mask]].T
+        kept_inverters = inverters.T.loc[inv.index[inv_keep_mask]].T
+
+        return kept_modules, kept_inverters
+
+    @staticmethod
+    def _estimate_cell_T(Tamb_hot=45.0, POA_hot=1000.0, wind_hot=1.0, Uc=20.0, Uv=6.0):
+        # simple PVSyst-like linear model for hot case (good for screening)
+        return Tamb_hot + POA_hot / (Uc + Uv*max(wind_hot, 0.1))

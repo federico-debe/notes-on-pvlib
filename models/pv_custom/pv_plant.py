@@ -6,6 +6,14 @@ from models.pv_custom.enums import RackingType, SurfaceType, TechChoice, Trackin
 from pvlib.pvsystem import retrieve_sam
 
 
+class InverterBasicInfo(BaseModel):
+    name: str
+    nominal_power: float
+
+class ModuleBasicInfo(BaseModel):
+    name: str
+    nominal_power: float
+
 class PVPlant(BaseModel):
     '''class representing properties of a photovoltaic plant'''
 
@@ -32,8 +40,8 @@ class PVPlant(BaseModel):
     module_name: Optional[str] = ''
     inverter_name: Optional[str] = ''
     inevrter_id: Optional[str] = ''
-    module_names: Optional[List[str]] = []
-    inverter_names: Optional[List[str]] = []
+    module_names: Optional[List[ModuleBasicInfo]] = []
+    inverter_names: Optional[List[InverterBasicInfo]] = []
     strings: Optional[int] = 1
     modules_per_string: Optional[int] = 1
     number_of_inverters: Optional[int] = 1
@@ -97,8 +105,8 @@ class PVPlant(BaseModel):
         else:
             self.altitude = 0.0
 
-    def set_module_names(self, module_names):
+    def set_modules(self, module_names):
         self.module_names = module_names
 
-    def set_inverter_names(self, inverter_names):
+    def set_inverters(self, inverter_names):
         self.inverter_names = inverter_names

@@ -30,35 +30,26 @@ class GeographicalHelper:
         raise Exception(f"API error: {response.status_code}")
     
     @staticmethod
-    def get_design_temperatures(lat, lon, altitude, surface_type=None, racking_type=None, tilt_angle=30.0):
-       
-        # Get TMY data
+    def get_extreme_ambient_temperatures(lat, lon, altitude, surface_type=None, racking_type=None, tilt_angle=30.0):
+
         tmy, meta = pvgis.get_pvgis_tmy(
             latitude=lat,
             longitude=lon,
             map_variables=True,
             url="https://re.jrc.ec.europa.eu/api/v5_3/"
         )
-        
-        # Calculate solar geometry
         solar_zenith = GeographicalHelper._calculate_solar_zenith(tmy.index, lat, lon)
-        
-        # Improved cell temperature model
-        cell_temps = GeographicalHelper._calculate_cell_temperature(
-            tmy, solar_zenith, surface_type, racking_type, tilt_angle
-        )
-        
-        # Statistical analysis for design temperatures
-        hot_temp = float(np.percentile(cell_temps, 99))
-        cold_temp = float(np.percentile(cell_temps, 1))
-        
-        # Altitude adjustment using proper lapse rate
+        daytime_mask = solar_zenith < 85
+        tamb = tmy.loc[daytime_mask, 'temp_air']
+
+        hot_temp = float(np.percentile(tamb, 99))
+        cold_temp = float(np.percentile(tamb, 1))
+
         if altitude and altitude > 0:
             hot_temp, cold_temp = GeographicalHelper._altitude_adjustment(
                 hot_temp, cold_temp, altitude
             )
-        
-        # Validation and bounds checking
+
         hot_temp = max(hot_temp, GeographicalHelper._estimate_minimum_hot_temp(tmy, surface_type))
         
         return round(hot_temp, 1), round(cold_temp, 1)
