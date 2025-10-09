@@ -30,7 +30,7 @@ class GeographicalHelper:
         raise Exception(f"API error: {response.status_code}")
     
     @staticmethod
-    def get_design_temperatures(lat, lon, altitude, surface_type=None, racking_type=None, tilt_angle=30):
+    def get_design_temperatures(lat, lon, altitude, surface_type=None, racking_type=None, tilt_angle=30.0):
        
         # Get TMY data
         tmy, meta = pvgis.get_pvgis_tmy(

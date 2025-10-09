@@ -27,6 +27,7 @@ class PVPlant(BaseModel):
     mounting_place: RackingType
     percentage_loss: float
     yearly_loss: float
+    surface_type: Optional[SurfaceType] = SurfaceType.concrete
 
     module_name: Optional[str] = ''
     inverter_name: Optional[str] = ''
@@ -36,7 +37,6 @@ class PVPlant(BaseModel):
     strings: Optional[int] = 1
     modules_per_string: Optional[int] = 1
     number_of_inverters: Optional[int] = 1
-    surface_type: Optional[SurfaceType] = SurfaceType.concrete
     backtrack: Optional[bool] = None
     gcr: Optional[float] = 0.35
     b0: Optional[float] = 0.05

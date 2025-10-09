@@ -60,13 +60,13 @@ class TechChoice(Enum):
 
     @staticmethod
     def get_tech_choice_descritpion(tech_choice):
-        if tech_choice.value == TechChoice.CIGS:
+        if tech_choice.value == TechChoice.CIGS.value:
             return 'CIGS'
-        elif tech_choice.value == TechChoice.CdTe:
+        elif tech_choice.value == TechChoice.CdTe.value:
             return 'CdTe'
-        elif tech_choice.value == TechChoice.Mono_c_Si:
+        elif tech_choice.value == TechChoice.Mono_c_Si.value:
             return 'Mono-c-Si'
-        elif tech_choice.value == TechChoice.Multi_c_Si:
+        elif tech_choice.value == TechChoice.Multi_c_Si.value:
             return 'Multi-c-Si'
         else:
             return 'Thin Film'
