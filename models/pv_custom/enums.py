@@ -58,6 +58,19 @@ class TechChoice(Enum):
     Multi_c_Si = 3
     Thin_Film = 4
 
+    @staticmethod
+    def get_tech_choice_descritpion(tech_choice):
+        if tech_choice.value == TechChoice.CIGS:
+            return 'CIGS'
+        elif tech_choice.value == TechChoice.CdTe:
+            return 'CdTe'
+        elif tech_choice.value == TechChoice.Mono_c_Si:
+            return 'Mono-c-Si'
+        elif tech_choice.value == TechChoice.Multi_c_Si:
+            return 'Multi-c-Si'
+        else:
+            return 'Thin Film'
+
 class TrackingType(Enum):
     '''type of tracking for pv plant'''
     fixed = 0

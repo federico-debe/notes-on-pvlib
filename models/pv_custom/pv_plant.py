@@ -18,6 +18,7 @@ class PVPlant(BaseModel):
     kwp: float
     longitude: float
     latitude: float
+    altitude: Optional[float] = 0 # meters
     angle: float # degrees above horizontal (0 = horizontal axis, 90 = vertical axis)
     aspect: float # degrees from North, clockwise (0 = N, 90 = E, 180 = S, 270 = W)
     max_angle: Optional[float] = None
@@ -30,8 +31,8 @@ class PVPlant(BaseModel):
     module_name: Optional[str] = ''
     inverter_name: Optional[str] = ''
     inevrter_id: Optional[str] = ''
-    module_names: Optional[List[str]]
-    inverter_names: Optional[List[str]]
+    module_names: Optional[List[str]] = []
+    inverter_names: Optional[List[str]] = []
     strings: Optional[int] = 1
     modules_per_string: Optional[int] = 1
     number_of_inverters: Optional[int] = 1
@@ -85,3 +86,19 @@ class PVPlant(BaseModel):
             self.u_v = u_v
         temperature_model_parameters = dict(u_c=self.u_c, u_v=self.u_v, eta_m=eta_m, alpha_absorption=0.9)
         return temperature_model_parameters
+
+    @property
+    def get_tech_choice_description(self):
+        return TechChoice.get_tech_choice_descritpion(self.tech_choice)
+
+    def set_altitude(self, altitude):
+        if altitude is not None:
+            self.altitude = altitude
+        else:
+            self.altitude = 0.0
+
+    def set_module_names(self, module_names):
+        self.module_names = module_names
+
+    def set_inverter_names(self, inverter_names):
+        self.inverter_names = inverter_names
