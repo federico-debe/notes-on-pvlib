@@ -19,15 +19,15 @@ class RackingType(Enum):
 
     @staticmethod
     def get_default_model_temperature_params(racking_type):
-        U_v = 0
-        U_c = 0
+        u_v = 0
+        u_c = 0
         if racking_type.value == RackingType.open_rack.value or racking_type.value == RackingType.freestanding.value:
-            U_v = 29.0
+            u_v = 29.0
         elif racking_type.value == RackingType.close_mount.value or racking_type.value == RackingType.semi_integrated.value:
-            U_v = 20.0
+            u_v = 20.0
         else:
-            U_v = 15.0
-        return U_v, U_c
+            u_v = 15.0
+        return u_v, u_c
 
 class WiringMaterial(Enum):
     copper = 0
@@ -151,3 +151,46 @@ class SurfaceType(Enum):
     fresh_steel = 11
     dirty_steel = 12
     sea = 13
+
+
+class EditStatus(Enum):
+    NONE = 0
+    INSERT = 1
+    UPDATE = 2
+    DELETE = 3
+    UPDATE_AFTER_OPTIMIZATION = 4
+
+class EnergyPlantType(Enum):
+    PV = 0
+    GEOTHERMAL = 1
+    NONE = -100
+
+class PVBatteryConnectionType(Enum):
+    NONE = 0
+    DC = 1 # PV → Battery
+    AC = 2  # PV → Inverter → Battery
+
+class PriceType(Enum):
+    ENERGY_PRICE = 0
+    TECHNOLOGY_PRICE = 1
+    ENERGY_PURCHASE_TYPE = 2
+    #ENERGY_SELLING_TYPE = 3
+    INCENTIVE = 4
+    GENERIC = 5
+    TAX = 6
+
+class SortOption(Enum):
+    ALL = 0
+    PCC_ASC = 1
+    PCC_DESC = 2
+    NAME_ASC = 3
+    NAME_DESC = 4
+    CONTRACT_POWER_ASC = 5
+    CONTRACT_POWER_DESC = 6
+    YEARLY_CONSUMPTION_ASC = 7
+    YEARLY_CONSUMPTION_DESC = 8
+    REGION = 9
+    STATUS = 10
+    TYPE = 11
+    CREATION_DATE_ASC = 12
+    CREATION_DATE_DESC = 13

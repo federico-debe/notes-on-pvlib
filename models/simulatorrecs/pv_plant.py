@@ -3,7 +3,6 @@ from pydantic import BaseModel
 
 from common.enums import RackingType, SurfaceType, TechChoice, TrackingType
 
-from pvlib.location import Location
 from pvlib.pvsystem import retrieve_sam
 
 
@@ -14,6 +13,21 @@ class InverterBasicInfo(BaseModel):
 class ModuleBasicInfo(BaseModel):
     name: str
     nominal_power: float
+
+
+class TechComponentEditInfoContainer(BaseModel):
+    gcr: Optional[float] = 0.35
+    u_c: Optional[float] = None
+    u_v: Optional[float] = None
+    b_0: Optional[float] = 0.05
+    hot_ambient_temperature: Optional[float] = 40
+    cold_ambient_temperature: Optional[float] = -5
+
+    module: Optional[ModuleBasicInfo] = None
+    inverter: Optional[InverterBasicInfo] = None
+
+    modules: List[ModuleBasicInfo]
+    inverters: List[InverterBasicInfo]
 
 class PVPlant(BaseModel):
     '''class representing properties of a photovoltaic plant'''
@@ -95,20 +109,6 @@ class PVPlant(BaseModel):
             self.u_v = u_v
         temperature_model_parameters = dict(u_c=self.u_c, u_v=self.u_v, eta_m=eta_m, alpha_absorption=0.9)
         return temperature_model_parameters
-
-    @property
-    def get_tech_choice_description(self):
-        return TechChoice.get_tech_choice_descritpion(self.tech_choice)
-
-    @property
-    def get_location(self):
-        return Location(self.latitude, self.longitude, tz="Europe/Rome", altitude=self.altitude)
-
-    def set_altitude(self, altitude):
-        if altitude is not None:
-            self.altitude = altitude
-        else:
-            self.altitude = 0.0
 
     def set_modules(self, module_names):
         self.module_names = module_names

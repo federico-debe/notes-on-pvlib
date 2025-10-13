@@ -30,7 +30,7 @@ class GeographicalHelper:
         raise Exception(f"API error: {response.status_code}")
     
     @staticmethod
-    def get_extreme_ambient_temperatures(lat, lon, altitude, surface_type=None, racking_type=None, tilt_angle=30.0):
+    def get_extreme_ambient_temperatures(lat, lon, altitude, surface_type=None, racking_type=None):
 
         tmy, meta = pvgis.get_pvgis_tmy(
             latitude=lat,
