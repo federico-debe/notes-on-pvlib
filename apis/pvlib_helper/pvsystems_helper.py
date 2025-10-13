@@ -1,9 +1,11 @@
+import math
+from typing import Optional, Tuple
 import numpy as np
 import pandas as pd
 
 from pvlib import pvsystem as pv
 
-from models.pv_custom.enums import RackingType, TrackingType
+from common.enums import RackingType, TrackingType
 
 
 class PVSystemHelper:
@@ -125,3 +127,115 @@ class PVSystemHelper:
     def _estimate_cell_T(Tamb_hot=45.0, POA_hot=1000.0, wind_hot=1.0, Uc=20.0, Uv=6.0):
         # simple PVSyst-like linear model for hot case (good for screening)
         return Tamb_hot + POA_hot / (Uc + Uv*max(wind_hot, 0.1))
+
+    def pick_stringing(
+            self,
+            module, 
+            inverter, 
+            *,
+            t_cell_cold=-5.0, t_cell_hot=65.0, poa_w_per_m2=1000.0,
+            mppt_low_key='Mppt_low', mppt_high_key='Mppt_high',
+            vdcmax_key='Vdcmax', idcmax_key='Idcmax',
+            dc_ac_ratio=1.20, voc_margin=0.97, prefer_mid_window=True
+        ):
+        """Returns (modules_per_string, strings, details) with robust defaults."""
+        # Inverter essentials
+        need_inv = ['Paco', mppt_low_key, mppt_high_key, vdcmax_key]
+        miss_inv = PVSystemHelper._need(inverter, need_inv)
+        if miss_inv:
+            raise ValueError(f"Inverter parameters missing keys: {miss_inv}")
+
+        mppt_low  = float(inverter[mppt_low_key])
+        mppt_high = float(inverter[mppt_high_key])
+        vdcmax    = float(inverter[vdcmax_key])
+        idcmax    = float(inverter.get(idcmax_key, np.inf))
+        paco      = float(inverter['Paco'])
+
+        # Module IV at extremes
+        Vmp_cold, Imp_cold, Pmp_cold, Voc_cold, Isc_cold = PVSystemHelper.module_iv_at_complete(module, t_cell_cold, poa_w_per_m2)
+        Vmp_hot,  Imp_hot,  Pmp_hot,  Voc_hot,  Isc_hot  = PVSystemHelper.module_iv_at_complete(module, t_cell_hot,  poa_w_per_m2)
+
+        # Series constraints
+        n_series_max_by_mppt = int(np.floor(mppt_high / max(Vmp_cold, 1e-6)))
+        n_series_min_by_mppt = int(np.ceil (mppt_low  / max(Vmp_hot,  1e-6)))
+        n_series_max_by_voc  = int(np.floor(voc_margin * vdcmax / max(Voc_cold, 1e-6)))
+
+        n_series_min = max(1, n_series_min_by_mppt)
+        n_series_max = min(n_series_max_by_mppt, n_series_max_by_voc)
+
+        if n_series_min > n_series_max:
+            raise ValueError(
+                f"No valid series count. Computed n_series_min={n_series_min} (MPPT low @ hot) "
+                f"> n_series_max={n_series_max} (MPPT high/Vdcmax @ cold)."
+            )
+
+        # Pick a series count (try to sit near MPPT mid-window at 25°C)
+        if prefer_mid_window:
+            Vmp_nom, *_ = PVSystemHelper.module_iv_at_complete(module, 25.0, poa_w_per_m2)
+            target = 0.5*(mppt_low + mppt_high)
+            candidates = range(n_series_min, n_series_max+1)
+            # filter any that violate extremes
+            candidates = [n for n in candidates if (n*Vmp_cold <= mppt_high) and (n*Vmp_hot >= mppt_low)]
+            if not candidates:
+                candidates = [n_series_min]
+            n_series = min(candidates, key=lambda n: abs(n*Vmp_nom - target))
+        else:
+            n_series = n_series_min
+
+        Pmp_stc_module = float(module['V_mp_ref']) * float(module['I_mp_ref'])
+        Pmp_string_stc = n_series * Pmp_stc_module
+        dc_target = dc_ac_ratio * paco
+        n_strings = max(1, int(round(dc_target / max(Pmp_string_stc, 1e-9))))
+
+        total_imp_hot = n_strings * Imp_hot
+        if total_imp_hot > idcmax:
+            n_strings = max(1, int(np.floor(idcmax / max(Imp_hot, 1e-9))))
+            total_imp_hot = n_strings * Imp_hot
+
+        details = dict(
+            mppt_low=mppt_low, mppt_high=mppt_high, vdcmax=vdcmax, idcmax=idcmax, paco=paco,
+            Vmp_cold=Vmp_cold, Vmp_hot=Vmp_hot, Voc_cold=Voc_cold,
+            n_series_min_by_mppt=n_series_min_by_mppt,
+            n_series_max_by_mppt=n_series_max_by_mppt,
+            n_series_max_by_voc=n_series_max_by_voc,
+            chosen_series=n_series,
+            Pmp_module_stc=Pmp_stc_module,
+            Pmp_string_stc=Pmp_string_stc,
+            dc_target_W=dc_target,
+            chosen_strings=n_strings,
+            total_imp_hot=total_imp_hot
+        )
+        return n_series, n_strings, details
+
+    @staticmethod
+    def module_iv_at_complete(module_params, temp_cell_C=25.0, poa=1000.0):
+        """Return (Vmp, Imp, Pmp, Voc, Isc) at given cell temp using the CEC model.
+        Robust to a few missing optional CEC fields."""
+        # Required CEC keys (except we’ll default EgRef/dEgdT/Adjust)
+        required = ['alpha_sc','a_ref','I_L_ref','I_o_ref','R_sh_ref','R_s']
+        miss = PVSystemHelper._need(module_params, required)
+        if miss:
+            raise ValueError(f"CEC module parameters missing required keys: {miss}")
+
+        # EgRef  = float(module_params.get('EgRef', 1.121))      # eV, crystalline Si typical
+        # dEgdT  = float(module_params.get('dEgdT', -0.0002677)) # eV/K, crystalline Si typical
+        # Adjust = float(module_params.get('Adjust', 1.0))
+
+        calc = pv.calcparams_desoto(
+            effective_irradiance=float(poa),
+            temp_cell=float(temp_cell_C),
+            alpha_sc=float(module_params['alpha_sc']),
+            a_ref=float(module_params['a_ref']),
+            I_L_ref=float(module_params['I_L_ref']),
+            I_o_ref=float(module_params['I_o_ref']),
+            R_sh_ref=float(module_params['R_sh_ref']),
+            R_s=float(module_params['R_s']),
+            # Adjust=Adjust, EgRef=EgRef, dEgdT=dEgdT
+        )
+        out = pv.singlediode(*calc, method='lambertw')
+        return float(out['v_mp']), float(out['i_mp']), float(out['p_mp']), float(out['v_oc']), float(out['i_sc'])
+
+    @staticmethod
+    def _need(mp, keys):
+        missing = [k for k in keys if k not in mp or mp[k] is None or (hasattr(mp[k], 'isna') and mp[k].isna())]
+        return missing
