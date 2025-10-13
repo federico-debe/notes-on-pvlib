@@ -9,6 +9,12 @@ from models.gisrecs.pod_basic_info import BatteryBasicInfo, EnergyPlantBasicInfo
 from models.gisrecs.prices_search_info_container import TechnologyPriceInfoContainer
 
 
+class RequestedPVSystemCharacteristics(BaseModel):
+    peak_power: float = 0.
+    square_meters: float = 0.
+    angle: float = 0.
+    aspect: float = 0.
+
 class EnergyPlantEditInfoContainer(BaseModel):
     uri: str = ''
     project_uri: str
@@ -19,10 +25,7 @@ class EnergyPlantEditInfoContainer(BaseModel):
     capital_contribution: float = 0.
     plant_type: EnergyPlantType = EnergyPlantType.NONE
     # grid_connection_type: GridConnectionType
-    peak_power: float = 0.
-    square_meters: float = 0.
-    angle: float = 0.
-    aspect: float = 0.
+    requested_pv_system_characteristics: List[RequestedPVSystemCharacteristics] = []
     max_angle: Optional[float] = 90 # only if single-axis tracking
     backtrack: Optional[float] = False # only if freestanding
     material: TechChoice = TechChoice.Mono_c_Si
@@ -49,6 +52,10 @@ class EnergyPlantEditInfoContainer(BaseModel):
     @property
     def get_tech_choice_description(self):
         return TechChoice.get_tech_choice_descritpion(self.material)
+
+    @property
+    def total_peak_power(self):
+        return sum([conf.peak_power for conf in self.requested_pv_system_characteristics])
 
     def set_altitude(self, altitude):
         if altitude is not None:

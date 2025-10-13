@@ -11,4 +11,3 @@ class TechComponentsCriteria(BaseModel):
     material: TechChoice
     mounting_place: RackingType
     surface_type: SurfaceType
-    angle: float

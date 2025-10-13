@@ -129,68 +129,94 @@ class PVSystemHelper:
         return Tamb_hot + POA_hot / (Uc + Uv*max(wind_hot, 0.1))
 
     def pick_stringing(
-            self,
-            module, 
-            inverter, 
-            *,
-            t_cell_cold=-5.0, t_cell_hot=65.0, poa_w_per_m2=1000.0,
-            mppt_low_key='Mppt_low', mppt_high_key='Mppt_high',
-            vdcmax_key='Vdcmax', idcmax_key='Idcmax',
-            dc_ac_ratio=1.20, voc_margin=0.97, prefer_mid_window=True
-        ):
-        """Returns (modules_per_string, strings, details) with robust defaults."""
-        # Inverter essentials
-        need_inv = ['Paco', mppt_low_key, mppt_high_key, vdcmax_key]
-        miss_inv = PVSystemHelper._need(inverter, need_inv)
-        if miss_inv:
-            raise ValueError(f"Inverter parameters missing keys: {miss_inv}")
+        self,
+        module,
+        inverter,
+        *,
+        t_cell_cold=-5.0,
+        t_cell_hot=65.0,
+        poa_w_per_m2=1000.0,
+        mppt_low_key='Mppt_low',
+        mppt_high_key='Mppt_high',
+        vdcmax_key='Vdcmax',
+        idcmax_key='Idcmax',
+        dc_ac_ratio=1.20,
+        voc_margin=0.97,
+        prefer_mid_window=True,
+        # optional extras; used only if all are provided
+        n_mppt=None,
+        idc_mppt_max_a=None,
+        isc_mppt_max_a=None,
+        inputs_per_mppt=None,
+    ):
+        """
+        Returns (n_series, n_strings, details)
+        Uses only CEC fields you have; per-MPPT caps are applied only if optional args are given.
+        """
 
+        # inverter essentials (present in CEC)
         mppt_low  = float(inverter[mppt_low_key])
         mppt_high = float(inverter[mppt_high_key])
         vdcmax    = float(inverter[vdcmax_key])
         idcmax    = float(inverter.get(idcmax_key, np.inf))
         paco      = float(inverter['Paco'])
 
-        # Module IV at extremes
+        # module IV at extremes (use your helper)
         Vmp_cold, Imp_cold, Pmp_cold, Voc_cold, Isc_cold = PVSystemHelper.module_iv_at_complete(module, t_cell_cold, poa_w_per_m2)
         Vmp_hot,  Imp_hot,  Pmp_hot,  Voc_hot,  Isc_hot  = PVSystemHelper.module_iv_at_complete(module, t_cell_hot,  poa_w_per_m2)
 
-        # Series constraints
-        n_series_max_by_mppt = int(np.floor(mppt_high / max(Vmp_cold, 1e-6)))
-        n_series_min_by_mppt = int(np.ceil (mppt_low  / max(Vmp_hot,  1e-6)))
-        n_series_max_by_voc  = int(np.floor(voc_margin * vdcmax / max(Voc_cold, 1e-6)))
+        # --- series constraints (MPPT @ hot, Vdcmax @ cold) ---
+        n_series_max_by_mppt = int(math.floor(mppt_high / max(Vmp_cold, 1e-6)))
+        n_series_min_by_mppt = int(math.ceil (mppt_low  / max(Vmp_hot,  1e-6)))
+        n_series_max_by_voc  = int(math.floor(voc_margin * vdcmax / max(Voc_cold, 1e-6)))
 
         n_series_min = max(1, n_series_min_by_mppt)
         n_series_max = min(n_series_max_by_mppt, n_series_max_by_voc)
-
         if n_series_min > n_series_max:
             raise ValueError(
-                f"No valid series count. Computed n_series_min={n_series_min} (MPPT low @ hot) "
-                f"> n_series_max={n_series_max} (MPPT high/Vdcmax @ cold)."
+                f"no valid series count: min={n_series_min} > max={n_series_max} "
+                f"(mppt window / vdcmax constraints)"
             )
 
-        # Pick a series count (try to sit near MPPT mid-window at 25°C)
+        # pick modules per string
         if prefer_mid_window:
             Vmp_nom, *_ = PVSystemHelper.module_iv_at_complete(module, 25.0, poa_w_per_m2)
-            target = 0.5*(mppt_low + mppt_high)
-            candidates = range(n_series_min, n_series_max+1)
-            # filter any that violate extremes
-            candidates = [n for n in candidates if (n*Vmp_cold <= mppt_high) and (n*Vmp_hot >= mppt_low)]
-            if not candidates:
-                candidates = [n_series_min]
-            n_series = min(candidates, key=lambda n: abs(n*Vmp_nom - target))
+            target = 0.5 * (mppt_low + mppt_high)
+            candidates = [n for n in range(n_series_min, n_series_max + 1)
+                        if (n * Vmp_cold <= mppt_high) and (n * Vmp_hot >= mppt_low)]
+            n_series = min(candidates or [n_series_min], key=lambda n: abs(n * Vmp_nom - target))
         else:
             n_series = n_series_min
 
-        Pmp_stc_module = float(module['V_mp_ref']) * float(module['I_mp_ref'])
-        Pmp_string_stc = n_series * Pmp_stc_module
-        dc_target = dc_ac_ratio * paco
-        n_strings = max(1, int(round(dc_target / max(Pmp_string_stc, 1e-9))))
+        # STC string power and strings from dc/ac target
+        pmp_module_stc = float(module['STC'])  # you said STC is always present
+        pmp_string_stc = n_series * pmp_module_stc
+        dc_target_w = dc_ac_ratio * paco
+        n_strings = max(1, int(round(dc_target_w / max(pmp_string_stc, 1e-9))))
 
+        # total inverter DC current cap (Idcmax)
         total_imp_hot = n_strings * Imp_hot
         if total_imp_hot > idcmax:
-            n_strings = max(1, int(np.floor(idcmax / max(Imp_hot, 1e-9))))
+            n_strings = max(1, int(math.floor(idcmax / max(Imp_hot, 1e-9))))
             total_imp_hot = n_strings * Imp_hot
+
+        # --- optional: per-MPPT caps (apply only if all provided) ---
+        if (n_mppt is not None) and (idc_mppt_max_a is not None) and (inputs_per_mppt is not None):
+            strings_per_mppt = int(math.ceil(n_strings / max(1, int(n_mppt))))
+            cap_by_imp  = int(math.floor(idc_mppt_max_a / max(Imp_hot, 1e-9)))
+            per_mppt_cap = min(cap_by_imp, int(inputs_per_mppt))
+
+            if (isc_mppt_max_a is not None):
+                cap_by_isc = int(math.floor(isc_mppt_max_a / max(Isc_hot, 1e-9)))
+                per_mppt_cap = min(per_mppt_cap, cap_by_isc)
+
+            if strings_per_mppt > per_mppt_cap:
+                n_strings = max(1, int(per_mppt_cap) * int(n_mppt))
+                strings_per_mppt = int(math.ceil(n_strings / int(n_mppt)))
+                total_imp_hot = n_strings * Imp_hot
+        else:
+            strings_per_mppt = None
+            per_mppt_cap     = None
 
         details = dict(
             mppt_low=mppt_low, mppt_high=mppt_high, vdcmax=vdcmax, idcmax=idcmax, paco=paco,
@@ -199,13 +225,17 @@ class PVSystemHelper:
             n_series_max_by_mppt=n_series_max_by_mppt,
             n_series_max_by_voc=n_series_max_by_voc,
             chosen_series=n_series,
-            Pmp_module_stc=Pmp_stc_module,
-            Pmp_string_stc=Pmp_string_stc,
-            dc_target_W=dc_target,
+            Pmp_module_stc=pmp_module_stc,
+            Pmp_string_stc=pmp_string_stc,
+            dc_target_W=dc_target_w,
             chosen_strings=n_strings,
-            total_imp_hot=total_imp_hot
+            total_imp_hot=total_imp_hot,
+            n_mppt=n_mppt,
+            strings_per_mppt=strings_per_mppt,
+            per_mppt_cap=per_mppt_cap,
         )
         return n_series, n_strings, details
+
 
     @staticmethod
     def module_iv_at_complete(module_params, temp_cell_C=25.0, poa=1000.0):
