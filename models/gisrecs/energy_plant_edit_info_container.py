@@ -3,6 +3,8 @@ from common.enums import EditStatus, EnergyPlantType, RackingType, SurfaceType, 
 from datetime import date
 from typing import List, Optional
 
+from pvlib.location import Location
+
 from models.gisrecs.aggregate_basic_info import AggregateBasicInfo
 # from models.gisrecs.datetime_slot_info import DatetimeSlotInfo
 from models.gisrecs.pod_basic_info import BatteryBasicInfo, EnergyPlantBasicInfo, PoDBasicInfo
@@ -16,6 +18,8 @@ class RequestedPVSystemCharacteristics(BaseModel):
     aspect: float = 0.
 
 class EnergyPlantEditInfoContainer(BaseModel):
+    _total_peak_power = 0
+
     uri: str = ''
     project_uri: str
     selected_aggregate: AggregateBasicInfo
@@ -55,13 +59,23 @@ class EnergyPlantEditInfoContainer(BaseModel):
 
     @property
     def total_peak_power(self):
-        return sum([conf.peak_power for conf in self.requested_pv_system_characteristics])
+        if self._total_peak_power == 0 and len(self.requested_pv_system_characteristics) == 1:
+            return sum([conf.peak_power for conf in self.requested_pv_system_characteristics])
+        elif len(self.requested_pv_system_characteristics) > 1:
+            pass
+
+        return self._total_peak_power
+
+    @property
+    def get_location(self):
+        return Location(self.latitude, self.longitude, tz="Europe/Rome", altitude=self.altitude)
 
     def set_altitude(self, altitude):
         if altitude is not None:
             self.altitude = altitude
         else:
             self.altitude = 0.0
+
 
 class EnergyPlantEditInfoContainers(BaseModel):
     energy_plant_edit_info_containers: List[EnergyPlantEditInfoContainer] = []

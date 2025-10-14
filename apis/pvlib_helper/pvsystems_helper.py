@@ -462,3 +462,5 @@ class PVSystemHelper:
     def _need(mp, keys):
         missing = [k for k in keys if k not in mp or mp[k] is None or (hasattr(mp[k], 'isna') and mp[k].isna())]
         return missing
+
+
