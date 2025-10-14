@@ -11,14 +11,16 @@ from common.enums import RackingType, TrackingType
 class PVSystemHelper:
 
     def get_cec_inverters_by_kwp(
-            self, 
-            kwp,
-            dcac_max=1.35
-        ):
+        self,
+        kwp: float,
+        dcac_min: float = 1.05,
+        dcac_max: float = 1.35,
+        r_target: float = 1.15,
+    ):
+        inv = pv.retrieve_sam('cecinverter').T  # rows = inverters
+        pdc = kwp * 1000.0
 
-        inv = pv.retrieve_sam('cecinverter').T.copy()
-        Pdc = kwp * 1000.0
-
+        # max_n policy (same spirit as yours)
         if kwp <= 15:
             max_n = 1
         elif kwp <= 100:
@@ -29,19 +31,26 @@ class PVSystemHelper:
             max_n = max(4, int(kwp / 100))
 
         n_vals = np.arange(1, max_n + 1, dtype=float)
-        lower = Pdc / (n_vals * dcac_max)
-        upper = Pdc / (n_vals)
+        lower = pdc / (n_vals * dcac_max)    # per-inverter Paco lower bound
+        upper = pdc / (n_vals * dcac_min)    # per-inverter Paco upper bound
 
-        Paco = inv['Paco'].astype(float).values  
-        fits_any_n = np.any(
-            (Paco >= lower[:, None]) & (Paco <= upper[:, None]),
-            axis=0
-        )
+        paco = inv['Paco'].astype(float).values
+        fits_any_n = np.any((paco >= lower[:, None]) & (paco <= upper[:, None]), axis=0)
 
-        has_windows = inv[['Vdcmax', 'Mppt_low', 'Mppt_high']].notna().all(axis=1)
+        inv_fit = inv[fits_any_n].copy()
 
-        filtered = inv[fits_any_n & has_windows].T 
-        return filtered
+        # choose a "best" n near target DC/AC and compute the resulting DC/AC for ranking
+        paco_fit = inv_fit['Paco'].astype(float).values
+        n_best = np.clip(np.rint(pdc / (r_target * paco_fit)).astype(int), 1, max_n)
+        dcac_best = pdc / (n_best * paco_fit)
+
+        inv_fit['n_best'] = n_best
+        inv_fit['dcac_best'] = dcac_best
+        inv_fit['score'] = 1.0 - np.abs(dcac_best - r_target)  # higher is better
+
+        # sort best-first and return in the original orientation (rows=parameters, cols=inverters)
+        inv_fit = inv_fit.sort_values('score', ascending=False)
+        return inv_fit.T
 
     def get_cec_modules_by_tech_choice(self, technology) -> pd.DataFrame:
         cecmodules = pv.retrieve_sam('cecmod')
@@ -76,7 +85,7 @@ class PVSystemHelper:
         return filtered_modules
 
     @staticmethod
-    def filter_cec_modules_by_voltage(
+    def filter_cec_techs_by_voltage(
         cecmodules: pd.DataFrame,
         inverters: pd.DataFrame,
         u_v,
@@ -119,7 +128,7 @@ class PVSystemHelper:
         inv_keep_mask = feasible.any(axis=0)  # (N,)
 
         kept_modules   = cecmodules.loc[cecmodules.index[mod_keep_mask]].T
-        kept_inverters = inverters.T.loc[inv.index[inv_keep_mask]].T
+        kept_inverters = inverters.T.loc[inv.index[inv_keep_mask]].sort_values('score', ascending=False).T
 
         return kept_modules, kept_inverters
 
@@ -149,10 +158,6 @@ class PVSystemHelper:
         isc_mppt_max_a=None,
         inputs_per_mppt=None,
     ):
-        """
-        Returns (n_series, n_strings, details)
-        Uses only CEC fields you have; per-MPPT caps are applied only if optional args are given.
-        """
 
         # inverter essentials (present in CEC)
         mppt_low  = float(inverter[mppt_low_key])

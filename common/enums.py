@@ -19,6 +19,14 @@ class RackingType(Enum):
 
     @staticmethod
     def get_default_model_temperature_params(racking_type):
+        # RACKING_TO_U = {
+        #     'open_rack': (29.0, 0.0),
+        #     'freestanding': (29.0, 0.0),
+        #     'close_mount': (15.0, 6.0),
+        #     'semi_integrated': (20.0, 6.0),
+        #     'insulated_back': (15.0, 0.0),
+        #     'insulated': (10.0, 0.0),
+        # }
         u_v = 0
         u_c = 0
         if racking_type.value == RackingType.open_rack.value or racking_type.value == RackingType.freestanding.value:
@@ -27,7 +35,7 @@ class RackingType(Enum):
             u_v = 20.0
         else:
             u_v = 15.0
-        return u_v, u_c
+        return u_c, u_v
 
 class WiringMaterial(Enum):
     copper = 0
@@ -152,6 +160,45 @@ class SurfaceType(Enum):
     dirty_steel = 12
     sea = 13
 
+    @staticmethod
+    def get_hot_temperature_delta(surface_type):
+        DELTA_AMBIENT_HOT = {
+            SurfaceType.urban.name:        2.0,
+            SurfaceType.grass.name:        0.0,
+            SurfaceType.fresh_grass.name: -0.5,
+            SurfaceType.soil.name:         0.5,
+            SurfaceType.sand.name:         1.0,
+            SurfaceType.snow.name:        -1.0,
+            SurfaceType.fresh_snow.name:  -2.0,
+            SurfaceType.asphalt.name:      3.0,
+            SurfaceType.concrete.name:     1.5,
+            SurfaceType.aluminum.name:     2.0,
+            SurfaceType.copper.name:       2.0,
+            SurfaceType.fresh_steel.name:  2.5,
+            SurfaceType.dirty_steel.name:  2.0,
+            SurfaceType.sea.name:          0.0,
+        }
+        return DELTA_AMBIENT_HOT[surface_type]
+
+    @staticmethod
+    def get_cold_temperature_delta(surface_type):
+        DELTA_AMBIENT_COLD = {
+            SurfaceType.urban.name:       +0.5,   # urban heat island at night
+            SurfaceType.grass.name:        0.0,
+            SurfaceType.fresh_grass.name:  0.0,
+            SurfaceType.soil.name:         0.0,
+            SurfaceType.sand.name:        -0.2,
+            SurfaceType.snow.name:        -0.5,
+            SurfaceType.fresh_snow.name:  -1.0,
+            SurfaceType.asphalt.name:     +0.3,
+            SurfaceType.concrete.name:    +0.2,
+            SurfaceType.aluminum.name:     0.0,
+            SurfaceType.copper.name:       0.0,
+            SurfaceType.fresh_steel.name:  0.0,
+            SurfaceType.dirty_steel.name:  0.0,
+            SurfaceType.sea.name:         +0.2,
+        }
+        return DELTA_AMBIENT_COLD[surface_type]
 
 class EditStatus(Enum):
     NONE = 0

@@ -4,6 +4,8 @@ import requests
 
 from pvlib import iotools as pvgis
 
+from common.enums import SurfaceType
+
 class GeographicalHelper:
 
     @staticmethod
@@ -51,6 +53,7 @@ class GeographicalHelper:
             )
 
         hot_temp = max(hot_temp, GeographicalHelper._estimate_minimum_hot_temp(tmy, surface_type))
+        cold_temp = min(cold_temp, GeographicalHelper._estimate_minimum_cold_temp(tmy, surface_type))
         
         return round(hot_temp, 1), round(cold_temp, 1)
     
@@ -156,11 +159,15 @@ class GeographicalHelper:
         """Provide conservative minimum hot temperature based on location and surface"""
         max_ambient = tmy['temp_air'].max()
         
-        # Base temperature rise above ambient
-        if surface_type in ['dark_roof', 'close_roof']:
-            min_rise = 35  # Higher for roof-mounted systems
-        else:
-            min_rise = 28  # Open rack systems
+        min_rise = SurfaceType.get_hot_temperature_delta(surface_type)
         
         return max_ambient + min_rise
 
+    @staticmethod
+    def _estimate_minimum_cold_temp(tmy, surface_type):
+        """Provide conservative minimum hot temperature based on location and surface"""
+        min_ambient = tmy['temp_air'].min()
+        
+        min_rise = SurfaceType.get_cold_temperature_delta(surface_type)
+        
+        return min_ambient + min_rise

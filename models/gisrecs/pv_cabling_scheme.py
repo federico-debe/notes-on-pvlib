@@ -38,7 +38,11 @@ class PvCablingScheme(BaseModel):
         self.strings_per_inverter = n_strings
 
     def set_number_of_inverters(self):
-        self.number_of_inverters = int((self.peak_power * 1000.0) / (self.modules_per_string * self.get_module_parameters['STC']) / self.strings_per_inverter)
+        self.number_of_inverters = int(
+            (self.peak_power * 1000.0) / 
+            (self.modules_per_string * self.get_module_parameters['STC']) / 
+            self.strings_per_inverter
+        )
 
     @property
     def get_location(self):
