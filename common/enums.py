@@ -19,22 +19,20 @@ class RackingType(Enum):
 
     @staticmethod
     def get_default_model_temperature_params(racking_type):
-        # RACKING_TO_U = {
-        #     'open_rack': (29.0, 0.0),
-        #     'freestanding': (29.0, 0.0),
-        #     'close_mount': (15.0, 6.0),
-        #     'semi_integrated': (20.0, 6.0),
-        #     'insulated_back': (15.0, 0.0),
-        #     'insulated': (10.0, 0.0),
-        # }
         u_v = 0
         u_c = 0
         if racking_type.value == RackingType.open_rack.value or racking_type.value == RackingType.freestanding.value:
-            u_v = 29.0
-        elif racking_type.value == RackingType.close_mount.value or racking_type.value == RackingType.semi_integrated.value:
-            u_v = 20.0
+            u_c = 29.0
+        elif racking_type.value == RackingType.semi_integrated.value:
+            u_c = 20.0
+            u_v = 6.0
+        elif racking_type.value == RackingType.close_mount.value:
+            u_c = 15.0
+            u_v = 6.0
+        elif racking_type.value == RackingType.insulated_back.value:
+            u_c = 15.0
         else:
-            u_v = 15.0
+            u_c = 10.0
         return u_c, u_v
 
 class WiringMaterial(Enum):
