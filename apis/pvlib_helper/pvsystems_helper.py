@@ -1,11 +1,12 @@
 import math
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
 from pvlib import pvsystem as pv
 
 from common.enums import RackingType, TrackingType
+from models.gisrecs.energy_plant_edit_info_container import RequestedPVSystemCharacteristics
 
 
 class PVSystemHelper:
@@ -83,6 +84,13 @@ class PVSystemHelper:
             filtered_modules = filtered_modules.T[filtered_modules.T['STC'] / (filtered_modules.T['A_c'] * 1000) >= 0.19].T
 
         return filtered_modules
+
+    def filter_cec_modules_by_area(self, filtered_modules: pd.DataFrame, requested_characteristics: List[RequestedPVSystemCharacteristics]):
+        condition = (~filtered_modules.T['A_c'].isna()) & (~filtered_modules.T['STC'].isna())
+        for array in requested_characteristics:
+            n = math.floor(array.area / filtered_modules['A_c'])
+            condition = condition & (n * filtered_modules['STC'] >= array.peak_power * 1000)
+        return filtered_modules.T[condition].T
 
     @staticmethod
     def filter_cec_techs_by_voltage(
@@ -386,6 +394,13 @@ class PVSystemHelper:
         ]        
         n_series = min(candidates or [n_series_min], key=lambda n: abs(n * pmp_module_stc - dc_target_w))
         pmp_string_stc = n_series * pmp_module_stc
+        # for loop on peak_powers
+            # peak_power_1_contribution = peak_power_1 / (peak_power_1 + peak_power_2 + peak_power_3)
+            # calculate subarray_dc_target_w = dc_target_w * peak_power_1 / (peak_power_1 + peak_power_2 + peak_power_3)
+            # n_strings_subarray_1 = max(1, int(round(subarray_dc_target_w / max(pmp_string_stc, 1e-9))))
+            # if total_imp_hot > idcmax:
+            #     n_strings_subarray_1 = max(1, int(math.floor(idcmax / max(Imp_hot, 1e-9))))
+            #     total_imp_hot = n_strings_subarray_1 * Imp_hot
         n_strings = max(1, int(round(dc_target_w / max(pmp_string_stc, 1e-9))))
 
         # total inverter DC current cap (Idcmax)
@@ -395,7 +410,7 @@ class PVSystemHelper:
             total_imp_hot = n_strings * Imp_hot
 
         # --- optional: per-MPPT caps (apply only if all provided) ---
-        if (n_mppt is not None) and (idc_mppt_max_a is not None) and (inputs_per_mppt is not None):
+        if (n_mppt is not None) and (idc_mppt_max_a is not None) and (inputs_per_mppt is not None): # TODO: i
             strings_per_mppt = int(math.ceil(n_strings / max(1, int(n_mppt))))
             cap_by_imp  = int(math.floor(idc_mppt_max_a / max(Imp_hot, 1e-9)))
             per_mppt_cap = min(cap_by_imp, int(inputs_per_mppt))
